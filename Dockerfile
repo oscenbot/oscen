@@ -19,6 +19,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o oscen ./
 # Create a final image
 FROM alpine:3.13.5
 
+LABEL org.opencontainers.image.source https://github.com/oscenbot/oscen
+
 WORKDIR /
 RUN addgroup --gid 1000 -S oscen && adduser -S oscen -G oscen --uid 1000
 
