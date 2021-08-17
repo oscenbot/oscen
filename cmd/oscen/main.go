@@ -259,12 +259,15 @@ func main() {
 				if usr.lastPolled != nil {
 					afterEpochMs = (usr.lastPolled.Unix()) * 1000
 				}
+				logger.Info("epoch", zap.Int64("epoch", afterEpochMs))
 				// Spotify only makes available your last 50 played tracks.
 				// If this changes, we will need to add pagination :)
 				rp, err := client.PlayerRecentlyPlayedOpt(context.Background(), &spotify.RecentlyPlayedOptions{
 					Limit:        50,
 					AfterEpochMs: afterEpochMs,
 				})
+				// 19:18:52
+				// 19:21:52
 				if err != nil {
 					logger.Error("something went wrong polling", zap.Error(err))
 				}
