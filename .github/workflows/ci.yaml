@@ -4,7 +4,6 @@ on:
     tags:
       - v*
     branches:
-      - master
       - main
   pull_request:
 jobs:
@@ -17,3 +16,18 @@ jobs:
         uses: golangci/golangci-lint-action@v2
         with:
           version: v1.41.1
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 2
+    - uses: actions/setup-go@v2
+      with:
+        go-version: '1.17'
+    - name: Run coverage
+      run: go test -race -coverprofile=coverage.txt -covermode=atomic
+    - name: Upload coverage to Codecov
+      run: bash <(curl -s https://codecov.io/bash)
