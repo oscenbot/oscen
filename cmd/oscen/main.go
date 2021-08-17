@@ -3,6 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	interactionsrouter "oscen/interactions"
+	"time"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -10,12 +17,6 @@ import (
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	interactionsrouter "oscen/interactions"
-	"time"
 )
 
 const (
