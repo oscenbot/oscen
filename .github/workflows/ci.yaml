@@ -8,7 +8,7 @@ on:
   pull_request:
 jobs:
   golangci:
-    name: lint
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -18,7 +18,7 @@ jobs:
           version: v1.41.1
 
   test:
-    name: test
+    name: Test
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -32,8 +32,8 @@ jobs:
     - name: Upload coverage to Codecov
       run: bash <(curl -s https://codecov.io/bash)
 
-  build-release:
-    name: Build Release
+  docker:
+    name: Docker Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -51,5 +51,5 @@ jobs:
           push: true
           context: .
           tags: |
-            ghcr.io/oscenbot/oscen/oscen:latest
-            ghcr.io/oscenbot/oscen/oscen:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/oscen:latest
+            ghcr.io/${{ github.repository_owner }}/oscen:${{ github.sha }}
