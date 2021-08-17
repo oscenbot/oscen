@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -17,10 +18,8 @@ import (
 	"time"
 )
 
-
 const (
 	testChannel = "876943275490168883"
-
 )
 
 func ensureSpotifyClient(s *discordgo.Session, i *discordgo.InteractionCreate, userDb *pgxpool.Pool, auth *spotifyauth.Authenticator) (*spotify.Client, error) {
@@ -29,12 +28,13 @@ func ensureSpotifyClient(s *discordgo.Session, i *discordgo.InteractionCreate, u
 	tok := &oauth2.Token{
 		TokenType: "Bearer",
 	}
+	//language=SQL
 	r := userDb.QueryRow(context.Background(), "SELECT access_token, refresh_token, expiry FROM spotify_discord_links WHERE discord_id=$1 LIMIT 1;", userId)
 	err := r.Scan(
 		&tok.AccessToken,
 		&tok.RefreshToken,
 		&tok.Expiry,
-		)
+	)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -55,22 +55,20 @@ func ensureSpotifyClient(s *discordgo.Session, i *discordgo.InteractionCreate, u
 	return client, nil
 }
 
-func main() {
-	logger, _ := zap.NewProduction()
-	ctx := context.Background()
-
-	logger.Info("instantiating discord session")
-	discordSession, err := discordgo.New("Bot "+ os.Getenv("DISCORD_BOT_TOKEN"))
-	if err != nil {
-		log.Fatalf("failed to connect to discord: %s", err)
-	}
-
+func connectToDatabase(ctx context.Context) (*pgxpool.Pool, error) {
 	db, err := pgxpool.Connect(ctx, os.Getenv("POSTGRESQL_URL"))
 	if err != nil {
-		log.Fatalf("failed to connect to db: %s", err)
-	}
-	defer db.Close()
+		return nil, fmt.Errorf("failed to connect to db: %w", err)
 
+	}
+
+	if err := db.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("failed to ping db: %w", err)
+	}
+	return db, nil
+}
+
+func setupSpotifyAuth() *spotifyauth.Authenticator {
 	auth := spotifyauth.New(
 		spotifyauth.WithRedirectURL("http://localhost:8080/v1/spotify/auth/callback"),
 		spotifyauth.WithScopes(
@@ -78,19 +76,51 @@ func main() {
 			spotifyauth.ScopeUserReadPlaybackState,
 			spotifyauth.ScopeUserReadCurrentlyPlaying,
 			spotifyauth.ScopeUserReadRecentlyPlayed,
-			),
+		),
 	)
 
-	logger.Info("opening gateway")
+	return auth
+}
+
+func setupDiscordSession(log *zap.Logger) (*discordgo.Session, error) {
+	log.Info("instantiating discord session")
+	discordSession, err := discordgo.New("Bot " + os.Getenv("DISCORD_BOT_TOKEN"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate discord connection: %w", err)
+	}
+
+	log.Info("opening gateway")
 	err = discordSession.Open()
 	if err != nil {
-		log.Fatalf("failed to open to discord: %s", err)
+		return nil, fmt.Errorf("failed to open discord gateway: %w", err)
+	}
+
+	return discordSession, nil
+}
+
+func main() {
+	logger, _ := zap.NewProduction()
+	ctx := context.Background()
+
+	discordSession, err := setupDiscordSession(logger)
+	if err != nil {
+		log.Fatal(err)
 	}
 	defer discordSession.Close()
 
+	db, err := connectToDatabase(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	auth := setupSpotifyAuth()
+
 	router := interactionsrouter.New(discordSession, logger)
+	discordSession.AddHandler(router.Handle)
+
 	err = router.Register(&discordgo.ApplicationCommand{
-		Name: "np",
+		Name:        "np",
 		Description: "Shows your currently playing track",
 	}, func(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 		client, err := ensureSpotifyClient(s, i, db, auth)
@@ -119,7 +149,7 @@ func main() {
 	}
 
 	err = router.Register(&discordgo.ApplicationCommand{
-		Name: "register",
+		Name:        "register",
 		Description: "Links your spotify account to your discord account",
 	}, func(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 		url := auth.AuthURL(i.Member.User.ID)
@@ -154,7 +184,16 @@ func main() {
 		logger.Info("d", zap.Any("d", tok))
 
 		_, err = db.Exec(context.Background(),
-			`INSERT INTO spotify_discord_links(discord_id, access_token, refresh_token, expiry) VALUES($1, $2, $3, $4) ON CONFLICT(discord_id) DO UPDATE SET access_token=$2, refresh_token=$3, expiry=$4;`, state, tok.AccessToken, tok.RefreshToken, tok.Expiry)
+			//language=SQL
+			`INSERT INTO spotify_discord_links(
+					  discord_id,
+					  access_token,
+					  refresh_token,
+					  expiry
+				  ) VALUES($1, $2, $3, $4)
+				  ON CONFLICT(discord_id) DO UPDATE
+				  SET access_token=$2, refresh_token=$3, expiry=$4;`,
+			state, tok.AccessToken, tok.RefreshToken, tok.Expiry)
 		if err != nil {
 			log.Fatalf("failed to create record: %s", err)
 		}
@@ -170,9 +209,10 @@ func main() {
 		}
 	}()
 
-	go func(){
+	go func() {
 		for {
 			logger.Info("polling")
+			//language=SQL
 			r, err := db.Query(context.Background(), "SELECT discord_id, last_polled, access_token, refresh_token, expiry FROM spotify_discord_links;")
 			if err != nil {
 				logger.Error("something went wrong polling", zap.Error(err))
@@ -181,14 +221,14 @@ func main() {
 			defer r.Close()
 
 			type userData struct {
-				discordId string
+				discordId  string
 				lastPolled *time.Time
-				tok *oauth2.Token
+				tok        *oauth2.Token
 			}
 			usrs := []userData{}
 
 			for r.Next() {
-				 data := userData{
+				data := userData{
 					tok: &oauth2.Token{
 						TokenType: "Bearer",
 					},
@@ -199,7 +239,7 @@ func main() {
 					&data.tok.AccessToken,
 					&data.tok.RefreshToken,
 					&data.tok.Expiry,
-					)
+				)
 				if err != nil {
 					logger.Error("something went wrong polling", zap.Error(err))
 					return
@@ -212,16 +252,16 @@ func main() {
 				return
 			}
 
-
 			for _, usr := range usrs {
 				client := spotify.New(auth.Client(context.Background(), usr.tok))
 				var afterEpochMs int64 = 0
 				if usr.lastPolled != nil {
 					afterEpochMs = (usr.lastPolled.Unix()) * 1000
 				}
-				// TODO: Paginate if more than 50 :)
+				// Spotify only makes available your last 50 played tracks.
+				// If this changes, we will need to add pagination :)
 				rp, err := client.PlayerRecentlyPlayedOpt(context.Background(), &spotify.RecentlyPlayedOptions{
-					Limit: 50,
+					Limit:        50,
 					AfterEpochMs: afterEpochMs,
 				})
 				if err != nil {
@@ -240,13 +280,14 @@ func main() {
 
 				for _, rpi := range rp {
 					logger.Info("song played", zap.String("name", rpi.Track.Name), zap.String("username", discordUsr.Username))
+					//language=SQL
 					_, err = tx.Exec(context.Background(),
-						`INSERT INTO listens(discord_id, song_id, time) VALUES($1, $2, $3);`,  usr.discordId, rpi.Track.ID, rpi.PlayedAt)
+						`INSERT INTO listens(discord_id, song_id, time) VALUES($1, $2, $3);`, usr.discordId, rpi.Track.ID, rpi.PlayedAt)
 					if err != nil {
 						log.Fatalf("failed to create record: %s", err)
 					}
 				}
-
+				//language=SQL
 				_, err = tx.Exec(context.Background(),
 					`UPDATE spotify_discord_links SET last_polled=$1 WHERE discord_id=$2;`, time.Now(), usr.discordId)
 				if err != nil {
@@ -262,8 +303,6 @@ func main() {
 			time.Sleep(time.Second * 15)
 		}
 	}()
-
-	discordSession.AddHandler(router.Handle)
 
 	logger.Info("setup finished")
 	stop := make(chan os.Signal)
