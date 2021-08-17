@@ -1,4 +1,4 @@
-package interactionsrouter
+package interactions
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 func TestNew(t *testing.T) {
 	s := &discordgo.Session{}
 	log := zaptest.NewLogger(t)
-	rtr := New(s, log)
+	rtr := NewRouter(s, log)
 
 	assert.Equal(t, s, rtr.s)
 	assert.Equal(t, log, rtr.log)

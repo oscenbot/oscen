@@ -1,39 +1,51 @@
-package interactionsrouter
+package interactions
 
 import (
+	"context"
+
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
+
 const testGuild = "669541384327528461"
 
-type Handler func(s *discordgo.Session, i *discordgo.InteractionCreate) error
+type handler = func(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error
+type Interaction struct {
+	*discordgo.ApplicationCommand
+	handler handler
+}
+
 type router struct {
-	routes map[string]Handler
-	s *discordgo.Session
-	log *zap.Logger
+	routes map[string]handler
+	s      *discordgo.Session
+	log    *zap.Logger
 }
 
-func New(s *discordgo.Session, log *zap.Logger) *router {
+func NewRouter(s *discordgo.Session, log *zap.Logger) *router {
 	return &router{
-		s: s,
-		routes: map[string]Handler{},
-		log: log,
+		s:      s,
+		routes: map[string]handler{},
+		log:    log,
 	}
 }
 
-func (r *router) Register(cmd *discordgo.ApplicationCommand, h Handler) error {
-	r.log.Info("registering command with discord", zap.String("name", cmd.Name))
-	_, err := r.s.ApplicationCommandCreate(r.s.State.User.ID, testGuild, cmd)
-	if err != nil {
-		return err
-	}
+func (r *router) RegisterRoute(interactions ...*Interaction) error {
+	for _, i := range interactions {
+		r.log.Info("registering command with discord", zap.String("name", i.Name))
+		_, err := r.s.ApplicationCommandCreate(r.s.State.User.ID, testGuild, i.ApplicationCommand)
+		if err != nil {
+			return err
+		}
 
-	r.routes[cmd.Name] = h
+		r.routes[i.Name] = i.handler
+	}
 
 	return nil
 }
 
 func (r *router) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+
 	name := i.ApplicationCommandData().Name
 	r.log.Info("received interaction", zap.String("name", name))
 	handler, ok := r.routes[i.ApplicationCommandData().Name]
@@ -48,7 +60,7 @@ func (r *router) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	err := handler(s, i)
+	err := handler(ctx, s, i)
 	if err != nil {
 		r.log.Error("error handling interaction", zap.Error(err))
 	}
