@@ -7,16 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"oscen/historyscraper"
 	"oscen/interactions"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 )
 
 const (
@@ -144,109 +141,12 @@ func main() {
 		}
 	}()
 
-	go func() {
-		for {
-			logger.Info("polling")
-			//language=SQL
-			r, err := db.Query(context.Background(), "SELECT discord_id, last_polled, access_token, refresh_token, expiry FROM spotify_discord_links;")
-			if err != nil {
-				logger.Error("something went wrong polling", zap.Error(err))
-				return
-			}
-			defer r.Close()
-
-			type userData struct {
-				discordId  string
-				lastPolled *time.Time
-				tok        *oauth2.Token
-			}
-			usrs := []userData{}
-
-			for r.Next() {
-				data := userData{
-					tok: &oauth2.Token{
-						TokenType: "Bearer",
-					},
-				}
-				err = r.Scan(
-					&data.discordId,
-					&data.lastPolled,
-					&data.tok.AccessToken,
-					&data.tok.RefreshToken,
-					&data.tok.Expiry,
-				)
-				if err != nil {
-					logger.Error("something went wrong polling", zap.Error(err))
-					return
-				}
-				usrs = append(usrs, data)
-			}
-			// Any errors encountered by rows.Next or rows.Scan will be returned here
-			if r.Err() != nil {
-				logger.Error("something went wrong polling", zap.Error(r.Err()))
-				return
-			}
-
-			for _, usr := range usrs {
-				client := spotify.New(auth.Client(context.Background(), usr.tok))
-				var afterEpochMs int64 = 0
-				if usr.lastPolled != nil {
-					afterEpochMs = (usr.lastPolled.Unix()) * 1000
-				}
-				logger.Info("epoch", zap.Int64("epoch", afterEpochMs))
-				// Spotify only makes available your last 50 played tracks.
-				// If this changes, we will need to add pagination :)
-				rp, err := client.PlayerRecentlyPlayedOpt(context.Background(), &spotify.RecentlyPlayedOptions{
-					Limit:        50,
-					AfterEpochMs: afterEpochMs,
-				})
-				// 19:18:52
-				// 19:21:52
-				if err != nil {
-					logger.Error("something went wrong polling", zap.Error(err))
-				}
-
-				discordUsr, err := discordSession.User(usr.discordId)
-				if err != nil {
-					logger.Error("getting user failed", zap.Error(err))
-				}
-
-				tx, err := db.BeginTx(ctx, pgx.TxOptions{})
-				if err != nil {
-					logger.Error("getting tx failed", zap.Error(err))
-				}
-
-				for _, rpi := range rp {
-					logger.Info("song played", zap.String("name", rpi.Track.Name), zap.String("username", discordUsr.Username))
-
-					_, err := discordSession.ChannelMessageSend(testChannel, fmt.Sprintf("%s: %s (%s)", discordUsr.Username, rpi.Track.Name, rpi.Track.Artists[0].Name))
-					if err != nil {
-						log.Fatalf("failed to create record: %s", err)
-					}
-
-					//language=SQL
-					_, err = tx.Exec(context.Background(),
-						`INSERT INTO listens(discord_id, song_id, time) VALUES($1, $2, $3);`, usr.discordId, rpi.Track.ID, rpi.PlayedAt)
-					if err != nil {
-						log.Fatalf("failed to create record: %s", err)
-					}
-				}
-				//language=SQL
-				_, err = tx.Exec(context.Background(),
-					`UPDATE spotify_discord_links SET last_polled=$1 WHERE discord_id=$2;`, time.Now(), usr.discordId)
-				if err != nil {
-					log.Fatalf("failed to update record: %s", err)
-				}
-
-				err = tx.Commit(ctx)
-				if err != nil {
-					log.Fatalf("failed to commit tx: %s", err)
-				}
-			}
-
-			time.Sleep(time.Second * 15)
-		}
-	}()
+	hl := historyscraper.HistoryScraper{
+		Log:  logger.Named("scraper"),
+		DB:   db,
+		Auth: auth,
+	}
+	go hl.Run(ctx)
 
 	logger.Info("setup finished")
 	stop := make(chan os.Signal, 1)
