@@ -108,8 +108,6 @@ func main() {
 			log.Fatalf("failed to create command: %s", err)
 		}
 
-		logger.Info("d", zap.Any("d", tok))
-
 		//language=SQL
 		sql := `
 			INSERT INTO spotify_discord_links(
