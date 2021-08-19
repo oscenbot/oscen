@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"golang.org/x/oauth2"
+	"github.com/Postcord/objects"
 
-	"github.com/bwmarrin/discordgo"
+	"golang.org/x/oauth2"
 )
 
 type authURLProvider interface {
@@ -14,19 +14,21 @@ type authURLProvider interface {
 }
 
 func NewRegisterInteraction(auth authURLProvider) *Interaction {
-	h := func(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-		url := auth.AuthURL(i.Member.User.ID)
-		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
+	h := func(
+		ctx context.Context,
+		interaction *objects.Interaction,
+		interactionData *objects.ApplicationCommandInteractionData,
+	) (*objects.InteractionResponse, error) {
+		url := auth.AuthURL(fmt.Sprintf("%d", interaction.Member.User.ID))
+		return &objects.InteractionResponse{
+			Type: objects.ResponseChannelMessageWithSource,
+			Data: &objects.InteractionApplicationCommandCallbackData{
 				Content: fmt.Sprintf("Howdy! Visit: %s", url),
-			},
-		})
-		return err
+			}}, nil
 	}
 
 	return &Interaction{
-		ApplicationCommand: &discordgo.ApplicationCommand{
+		ApplicationCommand: &objects.ApplicationCommand{
 			Name:        "register",
 			Description: "Links your spotify account to your discord account",
 		},

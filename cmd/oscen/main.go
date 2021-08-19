@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,14 +11,13 @@ import (
 	"oscen/historyscraper"
 	"oscen/interactions"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Postcord/objects"
+
+	"github.com/Postcord/rest"
+
 	"github.com/jackc/pgx/v4/pgxpool"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
-)
-
-const (
-	testChannel = "876943275490168883"
 )
 
 func connectToDatabase(ctx context.Context) (*pgxpool.Pool, error) {
@@ -35,7 +35,7 @@ func connectToDatabase(ctx context.Context) (*pgxpool.Pool, error) {
 
 func setupSpotifyAuth() *spotifyauth.Authenticator {
 	auth := spotifyauth.New(
-		spotifyauth.WithRedirectURL("http://localhost:8080/v1/spotify/auth/callback"),
+		spotifyauth.WithRedirectURL(os.Getenv("CALLBACK_HOST")+"/v1/spotify/auth/callback"),
 		spotifyauth.WithScopes(
 			spotifyauth.ScopeUserReadPrivate,
 			spotifyauth.ScopeUserReadPlaybackState,
@@ -47,31 +47,33 @@ func setupSpotifyAuth() *spotifyauth.Authenticator {
 	return auth
 }
 
-func setupDiscordSession(log *zap.Logger) (*discordgo.Session, error) {
-	log.Info("instantiating discord session")
-	discordSession, err := discordgo.New("Bot " + os.Getenv("DISCORD_BOT_TOKEN"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate discord connection: %w", err)
-	}
+func setupDiscord(log *zap.Logger) (*rest.Client, error) {
+	log.Info("setting up discord client")
+	token := "Bot " + os.Getenv("DISCORD_BOT_TOKEN")
+	discord := rest.New(&rest.Config{
+		Token:     token,
+		UserAgent: "oscen",
+	})
 
-	log.Info("opening gateway")
-	err = discordSession.Open()
+	usr, err := discord.GetCurrentUser()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open discord gateway: %w", err)
+		return nil, err
 	}
+	log.Info("connected to discord",
+		zap.String("username", usr.Username),
+	)
 
-	return discordSession, nil
+	return discord, nil
 }
 
 func main() {
-	logger, _ := zap.NewProduction()
+	logger, _ := zap.NewDevelopment()
 	ctx := context.Background()
 
-	discordSession, err := setupDiscordSession(logger)
+	discord, err := setupDiscord(logger)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer discordSession.Close()
 
 	db, err := connectToDatabase(ctx)
 	if err != nil {
@@ -81,17 +83,37 @@ func main() {
 
 	auth := setupSpotifyAuth()
 
-	router := interactions.NewRouter(discordSession, logger)
-	discordSession.AddHandler(router.Handle)
+	publicKey := os.Getenv("DISCORD_PUBLIC_KEY")
+	if publicKey == "" {
+		log.Fatal("DISCORD_PUBLIC_KEY must be set")
+	}
 
-	err = router.RegisterRoute(
+	decodedKey, err := hex.DecodeString(publicKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	router := interactions.NewRouter(
+		logger.Named("router"),
+		decodedKey,
+		discord,
+	)
+
+	err = router.Register(
 		interactions.NewNowPlayingInteraction(db, auth),
 		interactions.NewRegisterInteraction(auth),
 	)
 	if err != nil {
-		log.Fatalf("%s", err)
+		log.Fatal(err)
 	}
 
+	testGuild := objects.Snowflake(669541384327528461)
+	err = router.SyncInteractions(&testGuild)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	http.Handle("/v1/discord/interactions", router)
 	http.HandleFunc("/v1/spotify/auth/callback", func(w http.ResponseWriter, r *http.Request) {
 		values := r.URL.Query()
 		if e := values.Get("error"); e != "" {
@@ -132,8 +154,8 @@ func main() {
 
 	})
 	go func() {
-		logger.Info("listening for callbacks at 8080")
-		err := http.ListenAndServe(":8080", nil)
+		logger.Info("listening for http at 9000")
+		err := http.ListenAndServe(":9000", nil)
 		if err != nil {
 			log.Fatal(err)
 		}

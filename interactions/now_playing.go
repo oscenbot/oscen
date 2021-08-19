@@ -2,8 +2,10 @@ package interactions
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Postcord/objects"
+
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/zmb3/spotify/v2"
@@ -11,14 +13,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var ErrNotRegistered = fmt.Errorf("user not registered")
+
 func ensureSpotifyClient(
 	ctx context.Context,
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
+	i *objects.Interaction,
 	userDb *pgxpool.Pool,
 	auth *spotifyauth.Authenticator,
 ) (*spotify.Client, error) {
-	userId := i.Member.User.ID
+	userId := fmt.Sprintf("%d", i.Member.User.ID)
 
 	tok := &oauth2.Token{
 		TokenType: "Bearer",
@@ -40,15 +43,7 @@ func ensureSpotifyClient(
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "You need to use /register before you can use other commands",
-				},
-			})
-			if err != nil {
-				return nil, err
-			}
+			return nil, ErrNotRegistered
 		}
 		return nil, err
 	}
@@ -58,33 +53,43 @@ func ensureSpotifyClient(
 }
 
 func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator) *Interaction {
-	h := func(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-		client, err := ensureSpotifyClient(ctx, s, i, db, auth)
+	h := func(
+		ctx context.Context,
+		interaction *objects.Interaction,
+		interactionData *objects.ApplicationCommandInteractionData,
+	) (*objects.InteractionResponse, error) {
+		client, err := ensureSpotifyClient(ctx, interaction, db, auth)
 		if err != nil {
-			return err
+			if err == ErrNotRegistered {
+				return &objects.InteractionResponse{
+					Type: objects.ResponseChannelMessageWithSource,
+					Data: &objects.InteractionApplicationCommandCallbackData{
+						Content: "You need to use /register before you can use other commands",
+					},
+				}, nil
+			}
+
+			return nil, err
 		}
 
 		np, err := client.PlayerCurrentlyPlaying(ctx)
 		if err != nil {
-			return err
-		}
-		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "You are listening to: " + np.Item.Name,
-			},
-		})
-		if err != nil {
-			return err
+			return nil, err
 		}
 
-		return nil
+		return &objects.InteractionResponse{
+			Type: objects.ResponseChannelMessageWithSource,
+			Data: &objects.InteractionApplicationCommandCallbackData{
+				Content: "You are listening to: " + np.Item.Name,
+			},
+		}, nil
 	}
 
 	return &Interaction{
-		ApplicationCommand: &discordgo.ApplicationCommand{
-			Name:        "np",
-			Description: "Shows your currently playing track",
+		ApplicationCommand: &objects.ApplicationCommand{
+			Name:              "np",
+			Description:       "Shows your currently playing track",
+			DefaultPermission: true,
 		},
 		handler: h,
 	}
