@@ -11,12 +11,18 @@ import (
 	"oscen/historyscraper"
 	"oscen/interactions"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+
 	"github.com/Postcord/objects"
-
 	"github.com/Postcord/rest"
-
 	"github.com/jackc/pgx/v4/pgxpool"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/sdk/resource"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.uber.org/zap"
 )
 
@@ -66,9 +72,32 @@ func setupDiscord(log *zap.Logger) (*rest.Client, error) {
 	return discord, nil
 }
 
+func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
+	// Create the Jaeger exporter
+	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(url)))
+	if err != nil {
+		return nil, err
+	}
+	tp := tracesdk.NewTracerProvider(
+		tracesdk.WithBatcher(exp),
+		tracesdk.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("oscen"),
+			attribute.String("environment", "dev"),
+		)),
+	)
+	return tp, nil
+}
+
 func main() {
 	logger, _ := zap.NewDevelopment()
 	ctx := context.Background()
+
+	tp, err := tracerProvider("http://localhost:14268/api/traces")
+	if err != nil {
+		log.Fatal(err)
+	}
+	otel.SetTracerProvider(tp)
 
 	discord, err := setupDiscord(logger)
 	if err != nil {
@@ -113,25 +142,28 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.Handle("/v1/discord/interactions", router)
-	http.HandleFunc("/v1/spotify/auth/callback", func(w http.ResponseWriter, r *http.Request) {
-		values := r.URL.Query()
-		if e := values.Get("error"); e != "" {
-			log.Fatal("sptoify auth failed")
-		}
-		code := values.Get("code")
-		if code == "" {
-			log.Fatal("no access code")
-		}
-		state := values.Get("state")
+	http.Handle("/v1/discord/interactions",
+		otelhttp.NewHandler(router, "http.discord_interaction"),
+	)
+	http.Handle("/v1/spotify/auth/callback", otelhttp.NewHandler(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			values := r.URL.Query()
+			if e := values.Get("error"); e != "" {
+				log.Fatal("sptoify auth failed")
+			}
+			code := values.Get("code")
+			if code == "" {
+				log.Fatal("no access code")
+			}
+			state := values.Get("state")
 
-		tok, err := auth.Exchange(context.Background(), code)
-		if err != nil {
-			log.Fatalf("failed to create command: %s", err)
-		}
+			tok, err := auth.Exchange(context.Background(), code)
+			if err != nil {
+				log.Fatalf("failed to create command: %s", err)
+			}
 
-		//language=SQL
-		sql := `
+			//language=SQL
+			sql := `
 			INSERT INTO spotify_discord_links(
 				discord_id,
 				access_token,
@@ -141,18 +173,19 @@ func main() {
 			ON CONFLICT(discord_id) DO UPDATE
 				SET access_token=$2, refresh_token=$3, expiry=$4;
 		`
-		_, err = db.Exec(
-			context.Background(),
-			sql,
-			state, tok.AccessToken, tok.RefreshToken, tok.Expiry,
-		)
-		if err != nil {
-			log.Fatalf("failed to create record: %s", err)
-		}
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte("You can return to discord now :)"))
+			_, err = db.Exec(
+				context.Background(),
+				sql,
+				state, tok.AccessToken, tok.RefreshToken, tok.Expiry,
+			)
+			if err != nil {
+				log.Fatalf("failed to create record: %s", err)
+			}
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("You can return to discord now :)"))
 
-	})
+		},
+	), "http.spotify_callback"))
 	go func() {
 		logger.Info("listening for http at 9000")
 		err := http.ListenAndServe(":9000", nil)

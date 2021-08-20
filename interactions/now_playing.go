@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"go.opentelemetry.io/otel"
+
 	"github.com/Postcord/objects"
 
 	"github.com/jackc/pgx/v4"
@@ -14,6 +18,7 @@ import (
 )
 
 var ErrNotRegistered = fmt.Errorf("user not registered")
+var tracer = otel.Tracer("github.com/oscen/interactions")
 
 func ensureSpotifyClient(
 	ctx context.Context,
@@ -21,6 +26,9 @@ func ensureSpotifyClient(
 	userDb *pgxpool.Pool,
 	auth *spotifyauth.Authenticator,
 ) (*spotify.Client, error) {
+	ctx, childSpan := tracer.Start(ctx, "interactions.helper.ensure_spotify_client")
+	defer childSpan.End()
+
 	userId := fmt.Sprintf("%d", i.Member.User.ID)
 
 	tok := &oauth2.Token{
@@ -48,7 +56,10 @@ func ensureSpotifyClient(
 		return nil, err
 	}
 
-	client := spotify.New(auth.Client(ctx, tok))
+	http := auth.Client(ctx, tok)
+	http.Transport = otelhttp.NewTransport(http.Transport)
+	client := spotify.New(http)
+
 	return client, nil
 }
 

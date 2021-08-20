@@ -29,8 +29,9 @@ func NewRegisterInteraction(auth authURLProvider) *Interaction {
 
 	return &Interaction{
 		ApplicationCommand: &objects.ApplicationCommand{
-			Name:        "register",
-			Description: "Links your spotify account to your discord account",
+			Name:              "register",
+			Description:       "Links your spotify account to your discord account",
+			DefaultPermission: true,
 		},
 		handler: h,
 	}

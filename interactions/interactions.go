@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/Postcord/rest"
 
 	"github.com/Postcord/objects"
@@ -96,6 +98,9 @@ func (r *router) verifySignature(req *http.Request, body []byte) error {
 }
 
 func (r *router) handleCommand(ctx context.Context, interaction *objects.Interaction) (*objects.InteractionResponse, error) {
+	ctx, childSpan := tracer.Start(ctx, "interactions.handle_command")
+	defer childSpan.End()
+
 	r.log.Info("interaction", zap.Any("data", interaction))
 
 	commandData := &objects.ApplicationCommandInteractionData{}
@@ -103,6 +108,8 @@ func (r *router) handleCommand(ctx context.Context, interaction *objects.Interac
 	if err != nil {
 		return nil, err
 	}
+
+	childSpan.SetAttributes(attribute.String("io.oscen.command_name", commandData.Name))
 
 	handler, ok := r.routes[commandData.Name]
 	if !ok {
