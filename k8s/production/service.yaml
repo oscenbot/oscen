@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oscen
+  namespace: production
+spec:
+  selector:
+    app: oscen
+    environment: production
+    component: oscen
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 9000
+  type: LoadBalancer

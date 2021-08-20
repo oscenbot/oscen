@@ -15,3 +15,7 @@ A handy tool for engineers operating Oscen.
 ### `oscen-presence`
 
 A teeny-tiny-microservice that connects to the Discord websocket gateway. This is needed because the main binary does not connect to the gateway and this causes the bot to show as offline.
+
+## Ops
+
+ArgoCD is deployed into the cluster manually with Helm.

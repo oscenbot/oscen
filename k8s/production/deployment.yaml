@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oscen
+  labels:
+    app: oscen
+    component: oscen
+    environment: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oscen
+      component: oscen
+      environment: production
+  template:
+    metadata:
+      labels:
+        app: oscen
+        component: oscen
+        environment: production
+    spec:
+      containers:
+        - name: oscen
+          image: ghcr.io/oscenbot/oscen:57e640452be5675497d5cf7a1f00b27e82f18187
+          ports:
+            - containerPort: 9000
+          envFrom:
+            - secretRef:
+                name: oscen
+          env:
+            - name: CALLBACK_HOST
+              value: https://oscen.production.svc.oscen.io
