@@ -23,7 +23,8 @@ func NewRegisterInteraction(auth authURLProvider) *Interaction {
 		return &objects.InteractionResponse{
 			Type: objects.ResponseChannelMessageWithSource,
 			Data: &objects.InteractionApplicationCommandCallbackData{
-				Content: fmt.Sprintf("Howdy! Visit: %s", url),
+				Content: fmt.Sprintf("Howdy! Visit %s to register!", url),
+				Flags:   objects.ResponseFlagEphemeral,
 			}}, nil
 	}
 

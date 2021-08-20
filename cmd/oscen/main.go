@@ -166,7 +166,7 @@ func main() {
 		headers.Add("X-Clacks-Overhead", "GNU Terry Pratchett")
 		writer.WriteHeader(418)
 
-		msg := `Not much to see here. Checkout <a href="https://oscen.io> the site</a>"`
+		msg := `Not much to see here. Checkout <a href="https://oscen.io""> the site</a>`
 		_, _ = writer.Write([]byte(msg))
 	})
 
