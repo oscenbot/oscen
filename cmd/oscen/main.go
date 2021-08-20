@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"oscen/historyscraper"
 	"oscen/interactions"
+	"strconv"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -93,20 +94,25 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	ctx := context.Background()
 
-	tp, err := tracerProvider("http://localhost:14268/api/traces")
-	if err != nil {
-		log.Fatal(err)
+	jaegerURL := os.Getenv("JAEGER_URL")
+	if jaegerURL != "" {
+		tp, err := tracerProvider(jaegerURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		otel.SetTracerProvider(tp)
+	} else {
+		logger.Warn("JAEGER_URL not set, so traces will not be sent")
 	}
-	otel.SetTracerProvider(tp)
 
 	discord, err := setupDiscord(logger)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("failed to setup discord", zap.Error(err))
 	}
 
 	db, err := connectToDatabase(ctx)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("failed to setup db connection", zap.Error(err))
 	}
 	defer db.Close()
 
@@ -114,12 +120,12 @@ func main() {
 
 	publicKey := os.Getenv("DISCORD_PUBLIC_KEY")
 	if publicKey == "" {
-		log.Fatal("DISCORD_PUBLIC_KEY must be set")
+		logger.Fatal("DISCORD_PUBLIC_KEY must be set")
 	}
 
 	decodedKey, err := hex.DecodeString(publicKey)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("failed to decode public key", zap.Error(err))
 	}
 
 	router := interactions.NewRouter(
@@ -133,64 +139,53 @@ func main() {
 		interactions.NewRegisterInteraction(auth),
 	)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("failed to register routes", zap.Error(err))
 	}
 
-	testGuild := objects.Snowflake(669541384327528461)
-	err = router.SyncInteractions(&testGuild)
-	if err != nil {
-		log.Fatal(err)
+	var testGuild *objects.Snowflake
+	if guildId := os.Getenv("TEST_GUILD_ID"); guildId != "" {
+		val, err := strconv.Atoi("TEST_GUILD_ID")
+		if err != nil {
+			logger.Fatal(
+				"failed casting value of TEST_GUILD_ID",
+				zap.Error(err),
+			)
+		}
+		snowflake := objects.Snowflake(val)
+		testGuild = &snowflake
 	}
+
+	err = router.SyncInteractions(testGuild)
+	if err != nil {
+		logger.Fatal("failed to sync interactions", zap.Error(err))
+	}
+
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		headers := writer.Header()
+		headers.Add("X-Clacks-Overhead", "GNU Corey Kendall")
+		headers.Add("X-Clacks-Overhead", "GNU Terry Pratchett")
+		writer.WriteHeader(418)
+
+		msg := `Not much to see here. Checkout <a href="https://oscen.io> the site</a>"`
+		_, _ = writer.Write([]byte(msg))
+	})
 
 	http.Handle("/v1/discord/interactions",
 		otelhttp.NewHandler(router, "http.discord_interaction"),
 	)
-	http.Handle("/v1/spotify/auth/callback", otelhttp.NewHandler(http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			values := r.URL.Query()
-			if e := values.Get("error"); e != "" {
-				log.Fatal("sptoify auth failed")
-			}
-			code := values.Get("code")
-			if code == "" {
-				log.Fatal("no access code")
-			}
-			state := values.Get("state")
 
-			tok, err := auth.Exchange(context.Background(), code)
-			if err != nil {
-				log.Fatalf("failed to create command: %s", err)
-			}
+	http.Handle("/v1/spotify/auth/callback",
+		otelhttp.NewHandler(
+			SpotifyCallback(logger, db, auth),
+			"http.spotify_callback",
+		),
+	)
 
-			//language=SQL
-			sql := `
-			INSERT INTO spotify_discord_links(
-				discord_id,
-				access_token,
-				refresh_token,
-				expiry
-			) VALUES($1, $2, $3, $4)
-			ON CONFLICT(discord_id) DO UPDATE
-				SET access_token=$2, refresh_token=$3, expiry=$4;
-		`
-			_, err = db.Exec(
-				context.Background(),
-				sql,
-				state, tok.AccessToken, tok.RefreshToken, tok.Expiry,
-			)
-			if err != nil {
-				log.Fatalf("failed to create record: %s", err)
-			}
-			w.WriteHeader(200)
-			_, _ = w.Write([]byte("You can return to discord now :)"))
-
-		},
-	), "http.spotify_callback"))
 	go func() {
 		logger.Info("listening for http at 9000")
 		err := http.ListenAndServe(":9000", nil)
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal("error listening on 9000", zap.Error(err))
 		}
 	}()
 

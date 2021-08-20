@@ -35,6 +35,8 @@ func (hs *HistoryScraper) Run(ctx context.Context) {
 }
 
 func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
+	hs.Log.Debug("starting scrape")
+	start := time.Now()
 	//language=SQL
 	r, err := hs.DB.Query(context.Background(), "SELECT discord_id, access_token, refresh_token, expiry FROM spotify_discord_links;")
 	if err != nil {
@@ -77,10 +79,18 @@ func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	hs.Log.Info("finished scrape",
+		zap.Duration("duration", time.Since(start)),
+		zap.Int("user_count", len(usrs)),
+	)
+
 	return nil
 }
 
 func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok *oauth2.Token) error {
+	hs.Log.Debug("scraping user", zap.String("discord_id", discordID))
+	start := time.Now()
+
 	var lastPolled *time.Time
 	//language=SQL
 	row := hs.DB.QueryRow(ctx, "SELECT time FROM listens WHERE discord_id = $1 ORDER BY time DESC LIMIT 1;", discordID)
@@ -94,7 +104,6 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 	if lastPolled != nil {
 		afterEpochMs = (lastPolled.Add(time.Second).Unix()) * 1000
 	}
-	hs.Log.Info("epoch", zap.Int64("epoch", afterEpochMs))
 	// Spotify only makes available your last 50 played tracks.
 	// If this changes, we will need to add pagination :)
 	rp, err := client.PlayerRecentlyPlayedOpt(ctx, &spotify.RecentlyPlayedOptions{
@@ -111,7 +120,7 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 	}
 
 	for _, rpi := range rp {
-		hs.Log.Info("song played", zap.String("name", rpi.Track.Name), zap.String("user", discordID))
+		hs.Log.Debug("song played", zap.String("song_name", rpi.Track.Name), zap.String("discord_id", discordID))
 
 		//language=SQL
 		_, err = tx.Exec(context.Background(),
@@ -129,6 +138,12 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 	if err != nil {
 		return err
 	}
+
+	hs.Log.Info("scraped user",
+		zap.Duration("duration", time.Since(start)),
+		zap.String("discord_id", discordID),
+		zap.Int("song_count", len(rp)),
+	)
 
 	return nil
 }
