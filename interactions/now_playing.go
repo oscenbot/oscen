@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"oscen/repositories/listens"
+	"oscen/repositories/users"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -11,68 +12,43 @@ import (
 
 	"github.com/Postcord/objects"
 
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
-	"golang.org/x/oauth2"
 )
 
-var ErrNotRegistered = fmt.Errorf("user not registered")
 var tracer = otel.Tracer("github.com/oscen/interactions")
 
 func ensureSpotifyClient(
 	ctx context.Context,
 	i *objects.Interaction,
-	userDb *pgxpool.Pool,
+	userRepo *users.PostgresRepository,
 	auth *spotifyauth.Authenticator,
 ) (*spotify.Client, error) {
 	ctx, childSpan := tracer.Start(ctx, "interactions.helper.ensure_spotify_client")
 	defer childSpan.End()
 
 	userId := fmt.Sprintf("%d", i.Member.User.ID)
-
-	tok := &oauth2.Token{
-		TokenType: "Bearer",
-	}
-	//language=SQL
-	sql := `
-		SELECT
-			access_token, refresh_token, expiry
-		FROM spotify_discord_links
-		WHERE discord_id=$1
-		LIMIT 1;
-	`
-	r := userDb.QueryRow(ctx, sql, userId)
-	err := r.Scan(
-		&tok.AccessToken,
-		&tok.RefreshToken,
-		&tok.Expiry,
-	)
-
+	usr, err := userRepo.GetUserByDiscordID(ctx, userId)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, ErrNotRegistered
-		}
 		return nil, err
 	}
 
-	http := auth.Client(ctx, tok)
+	http := auth.Client(ctx, usr.SpotifyToken)
 	http.Transport = otelhttp.NewTransport(http.Transport)
 	client := spotify.New(http)
 
 	return client, nil
 }
 
-func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator, listensRepo *listens.PostgresRepository) *Interaction {
+func NewNowPlayingInteraction(userRepo *users.PostgresRepository, auth *spotifyauth.Authenticator, listensRepo *listens.PostgresRepository) *Interaction {
 	h := func(
 		ctx context.Context,
 		interaction *objects.Interaction,
 		interactionData *objects.ApplicationCommandInteractionData,
 	) (*objects.InteractionResponse, error) {
-		client, err := ensureSpotifyClient(ctx, interaction, db, auth)
+		client, err := ensureSpotifyClient(ctx, interaction, userRepo, auth)
 		if err != nil {
-			if err == ErrNotRegistered {
+			if err == users.ErrUserNotRegistered {
 				return &objects.InteractionResponse{
 					Type: objects.ResponseChannelMessageWithSource,
 					Data: &objects.InteractionApplicationCommandCallbackData{
@@ -100,12 +76,18 @@ func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator,
 			return nil, err
 		}
 
-		msg := "You are listening to %s. You've listened to this track %d times before, and %d tracks in total."
+		artistName := "unknown"
+		// TODO: Support multiple artists.
+		if len(np.Item.Artists) > 0 {
+			artistName = np.Item.Artists[0].Name
+		}
+
+		msg := "You are listening to %s - %s. You've listened to this track %d times before, and %d tracks in total."
 
 		return &objects.InteractionResponse{
 			Type: objects.ResponseChannelMessageWithSource,
 			Data: &objects.InteractionApplicationCommandCallbackData{
-				Content: fmt.Sprintf(msg, np.Item.Name, songListens, totalListens),
+				Content: fmt.Sprintf(msg, np.Item.Name, artistName, songListens, totalListens),
 			},
 		}, nil
 	}

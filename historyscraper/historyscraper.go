@@ -3,23 +3,22 @@ package historyscraper
 import (
 	"context"
 	"oscen/repositories/listens"
+	"oscen/repositories/users"
 	"time"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/zmb3/spotify/v2"
 
 	"golang.org/x/oauth2"
 
-	"github.com/jackc/pgx/v4/pgxpool"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
 )
 
 type HistoryScraper struct {
 	Log         *zap.Logger
-	DB          *pgxpool.Pool
 	Auth        *spotifyauth.Authenticator
 	ListensRepo *listens.PostgresRepository
+	UsersRepo   *users.PostgresRepository
 }
 
 func (hs *HistoryScraper) Run(ctx context.Context) {
@@ -39,44 +38,18 @@ func (hs *HistoryScraper) Run(ctx context.Context) {
 func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
 	hs.Log.Debug("starting scrape")
 	start := time.Now()
-	//language=SQL
-	r, err := hs.DB.Query(context.Background(), "SELECT discord_id, access_token, refresh_token, expiry FROM spotify_discord_links;")
+
+	usrs, err := hs.UsersRepo.GetUsers(ctx)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
-
-	type userData struct {
-		discordId string
-		tok       *oauth2.Token
-	}
-	usrs := []userData{}
-	{
-		for r.Next() {
-			data := userData{
-				tok: &oauth2.Token{
-					TokenType: "Bearer",
-				},
-			}
-			err = r.Scan(
-				&data.discordId,
-				&data.tok.AccessToken,
-				&data.tok.RefreshToken,
-				&data.tok.Expiry,
-			)
-			if err != nil {
-				return err
-			}
-			usrs = append(usrs, data)
-		}
-
-		if r.Err() != nil {
-			return err
-		}
-	}
 
 	for _, usr := range usrs {
-		if err := hs.ScrapeUser(ctx, usr.discordId, usr.tok); err != nil {
+		if err := hs.ScrapeUser(
+			ctx,
+			usr.DiscordID,
+			usr.SpotifyToken,
+		); err != nil {
 			return err
 		}
 	}
@@ -110,27 +83,20 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 		return err
 	}
 
-	tx, err := hs.DB.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
+	// TODO: if we iterate from the end to the start (oldest to newest)
+	// we can get rid of the transactions/batching. Problem for another day :)
 
+	batchWrite := make([]listens.BatchWriteListenEntry, 0, len(rp))
 	for _, rpi := range rp {
 		hs.Log.Debug("song played", zap.String("song_name", rpi.Track.Name), zap.String("discord_id", discordID))
 
-		//language=SQL
-		_, err = tx.Exec(context.Background(),
-			`INSERT INTO listens(discord_id, song_id, time) VALUES($1, $2, $3) ON CONFLICT DO NOTHING;`,
-			discordID,
-			rpi.Track.ID,
-			rpi.PlayedAt,
-		)
-		if err != nil {
-			return err
-		}
+		batchWrite = append(batchWrite, listens.BatchWriteListenEntry{
+			TrackID:  string(rpi.Track.ID),
+			PlayedAt: rpi.PlayedAt,
+		})
 	}
 
-	err = tx.Commit(ctx)
+	err = hs.ListensRepo.BatchWriteListens(ctx, discordID, batchWrite)
 	if err != nil {
 		return err
 	}

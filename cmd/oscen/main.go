@@ -11,6 +11,7 @@ import (
 	"oscen/historyscraper"
 	"oscen/interactions"
 	"oscen/repositories/listens"
+	"oscen/repositories/users"
 	"strconv"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -136,9 +137,10 @@ func main() {
 	)
 
 	listensRepo := listens.NewPostgresRepository(db)
+	usersRepo := users.NewPostgresRepository(db)
 
 	err = router.Register(
-		interactions.NewNowPlayingInteraction(db, auth, listensRepo),
+		interactions.NewNowPlayingInteraction(usersRepo, auth, listensRepo),
 		interactions.NewRegisterInteraction(auth),
 	)
 	if err != nil {
@@ -194,9 +196,9 @@ func main() {
 
 	hl := historyscraper.HistoryScraper{
 		Log:         logger.Named("scraper"),
-		DB:          db,
 		Auth:        auth,
 		ListensRepo: listensRepo,
+		UsersRepo:   usersRepo,
 	}
 	go hl.Run(ctx)
 

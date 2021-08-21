@@ -2,15 +2,15 @@ package main
 
 import (
 	"net/http"
+	"oscen/repositories/users"
 
-	"github.com/jackc/pgx/v4/pgxpool"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
 )
 
 // TODO: Extract this to a package someday
 
-func SpotifyCallback(logger *zap.Logger, db *pgxpool.Pool, auth *spotifyauth.Authenticator) http.HandlerFunc {
+func SpotifyCallback(logger *zap.Logger, userRepo *users.PostgresRepository, auth *spotifyauth.Authenticator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		values := r.URL.Query()
 
@@ -34,21 +34,9 @@ func SpotifyCallback(logger *zap.Logger, db *pgxpool.Pool, auth *spotifyauth.Aut
 			logger.Error("failed to exchange token", zap.Error(err))
 		}
 
-		//language=SQL
-		sql := `
-			INSERT INTO spotify_discord_links(
-				discord_id,
-				access_token,
-				refresh_token,
-				expiry
-			) VALUES($1, $2, $3, $4)
-			ON CONFLICT(discord_id) DO UPDATE
-				SET access_token=$2, refresh_token=$3, expiry=$4;
-		`
-		_, err = db.Exec(
+		err = userRepo.UpsertUser(
 			r.Context(),
-			sql,
-			state, tok.AccessToken, tok.RefreshToken, tok.Expiry,
+			users.UpsertUser{DiscordID: state, SpotifyToken: tok},
 		)
 		if err != nil {
 			logger.Error("failed to create record", zap.Error(err))
