@@ -31,3 +31,5 @@ spec:
           env:
             - name: CALLBACK_HOST
               value: https://oscen.production.svc.oscen.io
+            - name: JAEGER_URL
+              value: http://grafana-agent-traces.default.svc.cluster.local:14268
