@@ -3,6 +3,7 @@ package interactions
 import (
 	"context"
 	"fmt"
+	"oscen/repositories/listens"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -63,7 +64,7 @@ func ensureSpotifyClient(
 	return client, nil
 }
 
-func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator) *Interaction {
+func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator, listensRepo *listens.PostgresRepository) *Interaction {
 	h := func(
 		ctx context.Context,
 		interaction *objects.Interaction,
@@ -88,10 +89,23 @@ func NewNowPlayingInteraction(db *pgxpool.Pool, auth *spotifyauth.Authenticator)
 			return nil, err
 		}
 
+		userID := fmt.Sprintf("%d", interaction.Member.User.ID)
+		songListens, err := listensRepo.GetSongListenCount(ctx, userID, string(np.Item.ID))
+		if err != nil {
+			return nil, err
+		}
+
+		totalListens, err := listensRepo.GetUserListenCount(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		msg := "You are listening to %s. You've listened to this track %d times before, and %d tracks in total."
+
 		return &objects.InteractionResponse{
 			Type: objects.ResponseChannelMessageWithSource,
 			Data: &objects.InteractionApplicationCommandCallbackData{
-				Content: "You are listening to: " + np.Item.Name,
+				Content: fmt.Sprintf(msg, np.Item.Name, songListens, totalListens),
 			},
 		}, nil
 	}

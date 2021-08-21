@@ -2,6 +2,7 @@ package historyscraper
 
 import (
 	"context"
+	"oscen/repositories/listens"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -15,9 +16,10 @@ import (
 )
 
 type HistoryScraper struct {
-	Log  *zap.Logger
-	DB   *pgxpool.Pool
-	Auth *spotifyauth.Authenticator
+	Log         *zap.Logger
+	DB          *pgxpool.Pool
+	Auth        *spotifyauth.Authenticator
+	ListensRepo *listens.PostgresRepository
 }
 
 func (hs *HistoryScraper) Run(ctx context.Context) {
@@ -91,13 +93,7 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 	hs.Log.Debug("scraping user", zap.String("discord_id", discordID))
 	start := time.Now()
 
-	var lastPolled *time.Time
-	//language=SQL
-	row := hs.DB.QueryRow(ctx, "SELECT time FROM listens WHERE discord_id = $1 ORDER BY time DESC LIMIT 1;", discordID)
-	err := row.Scan(&lastPolled)
-	if err != nil && err != pgx.ErrNoRows {
-		return err
-	}
+	lastPolled, err := hs.ListensRepo.GetUsersLastListenTime(ctx, discordID)
 
 	client := spotify.New(hs.Auth.Client(ctx, tok))
 	var afterEpochMs int64 = 0
