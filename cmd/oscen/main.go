@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"oscen/historyscraper"
 	"oscen/interactions"
+	"oscen/playlistcreator"
 	"oscen/repositories/listens"
 	"oscen/repositories/users"
 	"strconv"
@@ -153,9 +154,16 @@ func main() {
 		discord,
 	)
 
+	plc := playlistcreator.New(
+		auth,
+		discord,
+		usersRepo,
+		logger.Named("playlist-creator"),
+	)
 	err = router.Register(
 		interactions.NewNowPlayingInteraction(usersRepo, auth, listensRepo),
 		interactions.NewRegisterInteraction(auth),
+		interactions.Generate(usersRepo, auth, plc),
 	)
 	if err != nil {
 		logger.Fatal("failed to register routes", zap.Error(err))
@@ -163,7 +171,7 @@ func main() {
 
 	var testGuild *objects.Snowflake
 	if guildId := os.Getenv("TEST_GUILD_ID"); guildId != "" {
-		val, err := strconv.Atoi("TEST_GUILD_ID")
+		val, err := strconv.Atoi(guildId)
 		if err != nil {
 			logger.Fatal(
 				"failed casting value of TEST_GUILD_ID",
@@ -172,6 +180,8 @@ func main() {
 		}
 		snowflake := objects.Snowflake(val)
 		testGuild = &snowflake
+
+		logger.Warn("applying commands to test guild", zap.Int("guild", val))
 	}
 
 	err = router.SyncInteractions(testGuild)

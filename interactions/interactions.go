@@ -139,8 +139,6 @@ func (r *router) handleRequest(req *http.Request) (interface{}, *httpStatusErr) 
 		return nil, wrapErrorForHTTP(401, err)
 	}
 
-	r.log.Debug("received request", zap.String("body", string(body)))
-
 	err = r.verifySignature(req, body)
 	if err != nil {
 		return nil, wrapErrorForHTTP(401, err)
