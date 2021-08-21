@@ -65,6 +65,15 @@ func NewNowPlayingInteraction(userRepo *users.PostgresRepository, auth *spotifya
 			return nil, err
 		}
 
+		if np == nil {
+			return &objects.InteractionResponse{
+				Type: objects.ResponseChannelMessageWithSource,
+				Data: &objects.InteractionApplicationCommandCallbackData{
+					Content: fmt.Sprintf("You aren't listening to anything..."),
+				},
+			}, nil
+		}
+
 		userID := fmt.Sprintf("%d", interaction.Member.User.ID)
 		songListens, err := listensRepo.GetSongListenCount(ctx, userID, string(np.Item.ID))
 		if err != nil {
