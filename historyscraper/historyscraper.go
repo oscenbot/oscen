@@ -19,6 +19,7 @@ type HistoryScraper struct {
 	Auth        *spotifyauth.Authenticator
 	ListensRepo *listens.PostgresRepository
 	UsersRepo   *users.PostgresRepository
+	Interval    time.Duration
 }
 
 func (hs *HistoryScraper) Run(ctx context.Context) {
@@ -31,7 +32,7 @@ func (hs *HistoryScraper) Run(ctx context.Context) {
 			hs.Log.Error("failed to run history logger", zap.Error(err))
 		}
 
-		time.Sleep(time.Second * 15)
+		time.Sleep(hs.Interval)
 	}
 }
 

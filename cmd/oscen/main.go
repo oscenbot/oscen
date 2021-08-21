@@ -13,6 +13,9 @@ import (
 	"oscen/repositories/listens"
 	"oscen/repositories/users"
 	"strconv"
+	"time"
+
+	"go.uber.org/zap/zapcore"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -50,6 +53,8 @@ func setupSpotifyAuth() *spotifyauth.Authenticator {
 			spotifyauth.ScopeUserReadPlaybackState,
 			spotifyauth.ScopeUserReadCurrentlyPlaying,
 			spotifyauth.ScopeUserReadRecentlyPlayed,
+			spotifyauth.ScopePlaylistModifyPublic,
+			spotifyauth.ScopeUserTopRead,
 		),
 	)
 
@@ -93,7 +98,16 @@ func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 }
 
 func main() {
-	logger, _ := zap.NewDevelopment()
+	logCfg := zap.NewProductionConfig()
+	if os.Getenv("DEBUG_LOG") != "" {
+		logCfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+	}
+
+	logger, err := logCfg.Build()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	ctx := context.Background()
 
 	jaegerURL := os.Getenv("JAEGER_URL")
@@ -199,6 +213,7 @@ func main() {
 		Auth:        auth,
 		ListensRepo: listensRepo,
 		UsersRepo:   usersRepo,
+		Interval:    time.Minute,
 	}
 	go hl.Run(ctx)
 
