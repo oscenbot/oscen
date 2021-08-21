@@ -118,6 +118,9 @@ func main() {
 	}
 	defer db.Close()
 
+	listensRepo := listens.NewPostgresRepository(db)
+	usersRepo := users.NewPostgresRepository(db)
+
 	auth := setupSpotifyAuth()
 
 	publicKey := os.Getenv("DISCORD_PUBLIC_KEY")
@@ -135,9 +138,6 @@ func main() {
 		decodedKey,
 		discord,
 	)
-
-	listensRepo := listens.NewPostgresRepository(db)
-	usersRepo := users.NewPostgresRepository(db)
 
 	err = router.Register(
 		interactions.NewNowPlayingInteraction(usersRepo, auth, listensRepo),
@@ -181,7 +181,7 @@ func main() {
 
 	http.Handle("/v1/spotify/auth/callback",
 		otelhttp.NewHandler(
-			SpotifyCallback(logger, db, auth),
+			SpotifyCallback(logger, usersRepo, auth),
 			"http.spotify_callback",
 		),
 	)
