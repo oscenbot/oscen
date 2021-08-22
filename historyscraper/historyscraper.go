@@ -4,7 +4,11 @@ import (
 	"context"
 	"oscen/repositories/listens"
 	"oscen/repositories/users"
+	"oscen/tracer"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zmb3/spotify/v2"
 
@@ -37,6 +41,9 @@ func (hs *HistoryScraper) Run(ctx context.Context) {
 }
 
 func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
+	ctx, childSpan := tracer.Start(ctx, "historyscraper.run_once")
+	defer childSpan.End()
+
 	hs.Log.Debug("starting scrape")
 	start := time.Now()
 
@@ -64,10 +71,20 @@ func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
 }
 
 func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok *oauth2.Token) error {
-	hs.Log.Debug("scraping user", zap.String("discord_id", discordID))
+	ctx, childSpan := tracer.Start(
+		ctx,
+		"historyscraper.scrape_user",
+		trace.WithAttributes(attribute.String("io.oscen.discord_user", discordID)),
+	)
+	defer childSpan.End()
+
+	hs.Log.Debug("scraping user", zap.String("discord_user", discordID))
 	start := time.Now()
 
 	lastPolled, err := hs.ListensRepo.GetUsersLastListenTime(ctx, discordID)
+	if err != nil {
+		return err
+	}
 
 	client := spotify.New(hs.Auth.Client(ctx, tok))
 	var afterEpochMs int64 = 0
@@ -89,7 +106,7 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 
 	batchWrite := make([]listens.BatchWriteListenEntry, 0, len(rp))
 	for _, rpi := range rp {
-		hs.Log.Debug("song played", zap.String("song_name", rpi.Track.Name), zap.String("discord_id", discordID))
+		hs.Log.Debug("song played", zap.String("song_name", rpi.Track.Name), zap.String("discord_user", discordID))
 
 		batchWrite = append(batchWrite, listens.BatchWriteListenEntry{
 			TrackID:  string(rpi.Track.ID),

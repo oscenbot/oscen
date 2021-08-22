@@ -5,18 +5,15 @@ import (
 	"fmt"
 	"oscen/repositories/listens"
 	"oscen/repositories/users"
+	"oscen/tracer"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	"go.opentelemetry.io/otel"
 
 	"github.com/Postcord/objects"
 
 	"github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 )
-
-var tracer = otel.Tracer("github.com/oscen/interactions")
 
 func ensureSpotifyClient(
 	ctx context.Context,
@@ -69,7 +66,7 @@ func NewNowPlayingInteraction(userRepo *users.PostgresRepository, auth *spotifya
 			return &objects.InteractionResponse{
 				Type: objects.ResponseChannelMessageWithSource,
 				Data: &objects.InteractionApplicationCommandCallbackData{
-					Content: fmt.Sprintf("You aren't listening to anything..."),
+					Content: "You aren't listening to anything...",
 				},
 			}, nil
 		}

@@ -2,6 +2,7 @@ package listens
 
 import (
 	"context"
+	"oscen/tracer"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -20,6 +21,9 @@ func (rp *PostgresRepository) GetUsersLastListenTime(
 	ctx context.Context,
 	discordID string,
 ) (*time.Time, error) {
+	ctx, childSpan := tracer.Start(ctx, "repositories.listens.get_users_last_listen_time")
+	defer childSpan.End()
+
 	var lastListenTime *time.Time
 	//language=SQL
 	sql := "SELECT time FROM listens WHERE discord_id = $1 ORDER BY time DESC LIMIT 1;"
@@ -37,6 +41,9 @@ func (rp *PostgresRepository) GetSongListenCount(
 	discordID string,
 	songID string,
 ) (int, error) {
+	ctx, childSpan := tracer.Start(ctx, "repositories.listens.get_song_listen_count")
+	defer childSpan.End()
+
 	listenCount := 0
 
 	//language=SQL
@@ -54,6 +61,9 @@ func (rp *PostgresRepository) GetUserListenCount(
 	ctx context.Context,
 	discordID string,
 ) (int, error) {
+	ctx, childSpan := tracer.Start(ctx, "repositories.listens.get_user_listen_count")
+	defer childSpan.End()
+
 	listenCount := 0
 
 	//language=SQL
@@ -77,12 +87,17 @@ func (rp *PostgresRepository) BatchWriteListens(
 	discordID string,
 	entries []BatchWriteListenEntry,
 ) error {
+	ctx, childSpan := tracer.Start(ctx, "repositories.listens.batch_write_listens")
+	defer childSpan.End()
+
 	// TODO: Use an actual batch rather than write loads as a transaction
 	tx, err := rp.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	//language=SQL
 	sql := `INSERT INTO listens(discord_id, song_id, time) VALUES($1, $2, $3) ON CONFLICT DO NOTHING;`

@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"oscen/repositories/users"
+	"oscen/tracer"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 
@@ -36,6 +39,9 @@ func New(
 }
 
 func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Interaction, initiatorSpotify *spotify.Client) (*string, error) {
+	ctx, childSpan := tracer.Start(ctx, "playlist_creator.create")
+	defer childSpan.End()
+
 	const songsPerMember = 5
 
 	members, err := pc.Discord.ListGuildMembers(interaction.GuildID, &rest.ListGuildMembersParams{
@@ -64,7 +70,9 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 	// Get top songs per user
 	playlistSongs := []spotify.ID{}
 	for _, member := range registeredGuildMembers {
-		memberSpotify := spotify.New(pc.SpotifyAuth.Client(ctx, member.SpotifyToken))
+		http := pc.SpotifyAuth.Client(ctx, member.SpotifyToken)
+		http.Transport = otelhttp.NewTransport(http.Transport)
+		memberSpotify := spotify.New(http)
 		topTracks, err := memberSpotify.CurrentUsersTopTracks(ctx, spotify.Limit(songsPerMember))
 		if err != nil {
 			pc.Logger.Warn("failed to fetch top tracks for user",
@@ -78,6 +86,7 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 			playlistSongs = append(playlistSongs, track.ID)
 		}
 	}
+	playlistSongs = deduplicateTracks(playlistSongs)
 
 	// TODO: Pagination when more than 100
 	if len(playlistSongs) >= 100 {
@@ -124,4 +133,17 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 	}
 
 	return &spotifyURL, nil
+}
+
+func deduplicateTracks(tracks []spotify.ID) []spotify.ID {
+	keys := make(map[spotify.ID]bool)
+	deduplicatedList := []spotify.ID{}
+
+	for _, trackId := range tracks {
+		if _, isPresent := keys[trackId]; !isPresent {
+			keys[trackId] = true
+			deduplicatedList = append(deduplicatedList, trackId)
+		}
+	}
+	return deduplicatedList
 }

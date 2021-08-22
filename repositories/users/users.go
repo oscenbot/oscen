@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"fmt"
+	"oscen/tracer"
 
 	"github.com/jackc/pgx/v4"
 
@@ -27,6 +28,9 @@ type User struct {
 func (rp *PostgresRepository) GetUsers(
 	ctx context.Context,
 ) ([]User, error) {
+	ctx, childSpan := tracer.Start(ctx, "repositories.users.get_users")
+	defer childSpan.End()
+
 	//language=SQL
 	sql := "SELECT discord_id, access_token, refresh_token, expiry FROM spotify_discord_links;"
 	r, err := rp.db.Query(ctx, sql)
@@ -67,6 +71,9 @@ func (rp *PostgresRepository) GetUserByDiscordID(
 	ctx context.Context,
 	discordID string,
 ) (*User, error) {
+	ctx, childSpan := tracer.Start(ctx, "repositories.users.get_user_by_discord_id")
+	defer childSpan.End()
+
 	//language=SQL
 	sql := "SELECT discord_id, access_token, refresh_token, expiry FROM spotify_discord_links WHERE discord_id=$1 LIMIT 1;"
 	row := rp.db.QueryRow(ctx, sql, discordID)
@@ -102,6 +109,9 @@ func (rp *PostgresRepository) UpsertUser(
 	ctx context.Context,
 	usr UpsertUser,
 ) error {
+	ctx, childSpan := tracer.Start(ctx, "repositories.users.upsert_user")
+	defer childSpan.End()
+
 	//language=SQL
 	sql := `
 		INSERT INTO spotify_discord_links(

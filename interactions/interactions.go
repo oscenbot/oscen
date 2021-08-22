@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"oscen/tracer"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -34,7 +35,7 @@ type router struct {
 	interactions []*Interaction
 	rest         *rest.Client
 	log          *zap.Logger
-	publicKey    []byte
+	publicKey    ed25519.PublicKey
 }
 
 func NewRouter(log *zap.Logger, publicKey ed25519.PublicKey, rest *rest.Client) *router {
@@ -90,7 +91,7 @@ func (r *router) verifySignature(req *http.Request, body []byte) error {
 		return fmt.Errorf("could not decode signature: %w", err)
 	}
 
-	if ed25519.Verify(r.publicKey, append(timestamp, body...), signature) == false {
+	if !ed25519.Verify(r.publicKey, append(timestamp, body...), signature) {
 		return fmt.Errorf("invalid signature")
 	}
 
@@ -98,10 +99,9 @@ func (r *router) verifySignature(req *http.Request, body []byte) error {
 }
 
 func (r *router) handleCommand(ctx context.Context, interaction *objects.Interaction) (*objects.InteractionResponse, error) {
+	r.log.Debug("interaction.handle_command", zap.Any("data", interaction))
 	ctx, childSpan := tracer.Start(ctx, "interactions.handle_command")
 	defer childSpan.End()
-
-	r.log.Info("interaction", zap.Any("data", interaction))
 
 	commandData := &objects.ApplicationCommandInteractionData{}
 	err := json.Unmarshal(interaction.Data, commandData)
@@ -109,7 +109,10 @@ func (r *router) handleCommand(ctx context.Context, interaction *objects.Interac
 		return nil, err
 	}
 
-	childSpan.SetAttributes(attribute.String("io.oscen.command_name", commandData.Name))
+	childSpan.SetAttributes(
+		attribute.String("io.oscen.command_name", commandData.Name),
+		attribute.String("io.oscen.discord_user", fmt.Sprintf("%d", interaction.Member.User.ID)),
+	)
 
 	handler, ok := r.routes[commandData.Name]
 	if !ok {
