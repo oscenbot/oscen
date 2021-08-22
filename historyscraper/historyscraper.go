@@ -12,8 +12,6 @@ import (
 
 	"github.com/zmb3/spotify/v2"
 
-	"golang.org/x/oauth2"
-
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"go.uber.org/zap"
 )
@@ -53,11 +51,7 @@ func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
 	}
 
 	for _, usr := range usrs {
-		if err := hs.ScrapeUser(
-			ctx,
-			usr.DiscordID,
-			usr.SpotifyToken,
-		); err != nil {
+		if err := hs.ScrapeUser(ctx, &usr); err != nil {
 			return err
 		}
 	}
@@ -70,23 +64,23 @@ func (hs *HistoryScraper) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok *oauth2.Token) error {
+func (hs *HistoryScraper) ScrapeUser(ctx context.Context, user *users.User) error {
 	ctx, childSpan := tracer.Start(
 		ctx,
 		"historyscraper.scrape_user",
-		trace.WithAttributes(attribute.String("io.oscen.discord_user", discordID)),
+		trace.WithAttributes(attribute.String("io.oscen.discord_user", user.DiscordID)),
 	)
 	defer childSpan.End()
 
-	hs.Log.Debug("scraping user", zap.String("discord_user", discordID))
+	hs.Log.Debug("scraping user", zap.String("discord_user", user.DiscordID))
 	start := time.Now()
 
-	lastPolled, err := hs.ListensRepo.GetUsersLastListenTime(ctx, discordID)
+	lastPolled, err := hs.ListensRepo.GetUsersLastListenTime(ctx, user.DiscordID)
 	if err != nil {
 		return err
 	}
 
-	client := spotify.New(hs.Auth.Client(ctx, tok))
+	client := user.SpotifyClient(ctx, hs.Auth)
 	var afterEpochMs int64 = 0
 	if lastPolled != nil {
 		afterEpochMs = (lastPolled.Add(time.Second).Unix()) * 1000
@@ -103,10 +97,12 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 
 	// TODO: if we iterate from the end to the start (oldest to newest)
 	// we can get rid of the transactions/batching. Problem for another day :)
-
 	batchWrite := make([]listens.BatchWriteListenEntry, 0, len(rp))
 	for _, rpi := range rp {
-		hs.Log.Debug("song played", zap.String("song_name", rpi.Track.Name), zap.String("discord_user", discordID))
+		hs.Log.Debug("song played",
+			zap.String("song_name", rpi.Track.Name),
+			zap.String("discord_user", user.DiscordID),
+		)
 
 		batchWrite = append(batchWrite, listens.BatchWriteListenEntry{
 			TrackID:  string(rpi.Track.ID),
@@ -114,14 +110,14 @@ func (hs *HistoryScraper) ScrapeUser(ctx context.Context, discordID string, tok 
 		})
 	}
 
-	err = hs.ListensRepo.BatchWriteListens(ctx, discordID, batchWrite)
+	err = hs.ListensRepo.BatchWriteListens(ctx, user.DiscordID, batchWrite)
 	if err != nil {
 		return err
 	}
 
 	hs.Log.Info("scraped user",
 		zap.Duration("duration", time.Since(start)),
-		zap.String("discord_id", discordID),
+		zap.String("discord_id", user.DiscordID),
 		zap.Int("song_count", len(rp)),
 	)
 

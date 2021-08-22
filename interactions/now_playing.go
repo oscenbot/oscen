@@ -7,8 +7,6 @@ import (
 	"oscen/repositories/users"
 	"oscen/tracer"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
 	"github.com/Postcord/objects"
 
 	"github.com/zmb3/spotify/v2"
@@ -30,11 +28,7 @@ func ensureSpotifyClient(
 		return nil, err
 	}
 
-	http := auth.Client(ctx, usr.SpotifyToken)
-	http.Transport = otelhttp.NewTransport(http.Transport)
-	client := spotify.New(http)
-
-	return client, nil
+	return usr.SpotifyClient(ctx, auth), nil
 }
 
 func NewNowPlayingInteraction(userRepo *users.PostgresRepository, auth *spotifyauth.Authenticator, listensRepo *listens.PostgresRepository) *Interaction {

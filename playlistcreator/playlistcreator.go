@@ -7,8 +7,6 @@ import (
 	"oscen/tracer"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 
 	"github.com/Postcord/objects"
@@ -70,9 +68,7 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 	// Get top songs per user
 	playlistSongs := []spotify.ID{}
 	for _, member := range registeredGuildMembers {
-		http := pc.SpotifyAuth.Client(ctx, member.SpotifyToken)
-		http.Transport = otelhttp.NewTransport(http.Transport)
-		memberSpotify := spotify.New(http)
+		memberSpotify := member.SpotifyClient(ctx, pc.SpotifyAuth)
 		topTracks, err := memberSpotify.CurrentUsersTopTracks(ctx, spotify.Limit(songsPerMember))
 		if err != nil {
 			pc.Logger.Warn("failed to fetch top tracks for user",

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"oscen/tracer"
 
+	"github.com/zmb3/spotify/v2"
+	spotifyauth "github.com/zmb3/spotify/v2/auth"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/jackc/pgx/v4"
 
 	"golang.org/x/oauth2"
@@ -23,6 +27,12 @@ func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
 type User struct {
 	DiscordID    string
 	SpotifyToken *oauth2.Token
+}
+
+func (u *User) SpotifyClient(ctx context.Context, auth *spotifyauth.Authenticator) *spotify.Client {
+	http := auth.Client(ctx, u.SpotifyToken)
+	http.Transport = otelhttp.NewTransport(http.Transport)
+	return spotify.New(http)
 }
 
 func (rp *PostgresRepository) GetUsers(
