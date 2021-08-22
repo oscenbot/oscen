@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: oscen
-          image: ghcr.io/oscenbot/oscen:fc0b85ab09a2fa8409265b79c096bd5f192fdc63
+          image: ghcr.io/oscenbot/oscen:a5abb9a3978c616d3849693134048fbefe9ba1a1
           ports:
             - containerPort: 9000
           envFrom:
