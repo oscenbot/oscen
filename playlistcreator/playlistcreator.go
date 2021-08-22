@@ -3,6 +3,7 @@ package playlistcreator
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"oscen/repositories/users"
 	"oscen/tracer"
 	"time"
@@ -69,7 +70,11 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 	playlistSongs := []spotify.ID{}
 	for _, member := range registeredGuildMembers {
 		memberSpotify := member.SpotifyClient(ctx, pc.SpotifyAuth)
-		topTracks, err := memberSpotify.CurrentUsersTopTracks(ctx, spotify.Limit(songsPerMember))
+		topTracks, err := memberSpotify.CurrentUsersTopTracks(
+			ctx,
+			spotify.Limit(songsPerMember),
+			spotify.Timerange(spotify.ShortTermRange),
+		)
 		if err != nil {
 			pc.Logger.Warn("failed to fetch top tracks for user",
 				zap.Error(err),
@@ -82,7 +87,13 @@ func (pc *PlaylistCreator) Create(ctx context.Context, interaction *objects.Inte
 			playlistSongs = append(playlistSongs, track.ID)
 		}
 	}
+
+	if len(playlistSongs) == 0 {
+		return nil, fmt.Errorf("no tracks selected")
+	}
+
 	playlistSongs = deduplicateTracks(playlistSongs)
+	shuffleTracks(playlistSongs)
 
 	// TODO: Pagination when more than 100
 	if len(playlistSongs) >= 100 {
@@ -142,4 +153,10 @@ func deduplicateTracks(tracks []spotify.ID) []spotify.ID {
 		}
 	}
 	return deduplicatedList
+}
+
+func shuffleTracks(tracks []spotify.ID) {
+	rand.Shuffle(len(tracks), func(i, j int) {
+		tracks[i], tracks[j] = tracks[j], tracks[i]
+	})
 }

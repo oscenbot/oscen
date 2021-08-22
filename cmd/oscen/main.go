@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -99,6 +100,8 @@ func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	logCfg := zap.NewProductionConfig()
 	if os.Getenv("DEBUG_LOG") != "" {
 		logCfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
