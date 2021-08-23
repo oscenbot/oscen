@@ -32,4 +32,4 @@ spec:
             - name: CALLBACK_HOST
               value: https://oscen.production.svc.oscen.io
             - name: JAEGER_URL
-              value: http://main-collector.observability.svc.cluster.local:14268/api/traces
+              value: http://main-collector.jaeger.svc.cluster.local:14268/api/traces
