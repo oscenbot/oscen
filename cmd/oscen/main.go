@@ -165,8 +165,9 @@ func main() {
 	)
 	err = router.Register(
 		interactions.NewNowPlayingInteraction(usersRepo, auth, listensRepo),
+		interactions.NewListenLeaderboardInteraction(listensRepo, discord),
 		interactions.NewRegisterInteraction(auth),
-		interactions.Generate(usersRepo, auth, plc),
+		interactions.NewGenerateInteraction(usersRepo, auth, plc),
 	)
 	if err != nil {
 		logger.Fatal("failed to register routes", zap.Error(err))

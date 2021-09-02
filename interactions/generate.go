@@ -11,7 +11,7 @@ import (
 	"github.com/Postcord/objects"
 )
 
-func Generate(userRepo *users.PostgresRepository, auth *spotifyauth.Authenticator, playlistCreator *playlistcreator.PlaylistCreator) *Interaction {
+func NewGenerateInteraction(userRepo *users.PostgresRepository, auth *spotifyauth.Authenticator, playlistCreator *playlistcreator.PlaylistCreator) *Interaction {
 	h := func(
 		ctx context.Context,
 		interaction *objects.Interaction,
